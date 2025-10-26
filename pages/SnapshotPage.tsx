@@ -1,0 +1,148 @@
+import React, { useEffect, useState } from 'react';
+import type { Snapshot, ContentBlock, Message as MessageType } from '../types';
+import { ContentType, MessageAuthor } from '../types';
+import PDBViewer from '../components/PDBViewer';
+import MarkdownRenderer from '../components/MarkdownRenderer';
+import { RhesusIcon } from '../components/icons';
+import BlastViewer from '../components/BlastChart';
+
+
+const SnapshotPage: React.FC = () => {
+    const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        const hash = window.location.hash.substring(1);
+        const snapshotId = hash.split('/')[1];
+
+        if (snapshotId) {
+            const data = localStorage.getItem(`snapshot_${snapshotId}`);
+            if (data) {
+                try {
+                    setSnapshot(JSON.parse(data));
+                } catch (e) {
+                     setError("Snapshot data is corrupted and could not be read.");
+                }
+            } else {
+                setError("Snapshot not found. It may have expired or the link is incorrect.");
+            }
+        } else {
+            setError("Invalid snapshot link.");
+        }
+    }, []);
+
+    const renderContentBlock = (block: ContentBlock) => {
+        try {
+            // This is a single content block, not a chat session
+            switch (block.type) {
+                case ContentType.PDB_VIEWER:
+                    return <PDBViewer pdbId={block.data.pdbId} />;
+                case ContentType.TEXT:
+                    return <MarkdownRenderer content={block.data} />;
+                case ContentType.PUBMED_SUMMARY:
+                    return <div className="p-4 my-2 bg-slate-100 rounded-lg border border-slate-200"><h3 className="font-bold mb-2 primary-text">Literature Summary</h3><MarkdownRenderer content={block.data.summary} /></div>;
+                case ContentType.BLAST_RESULT:
+                    const hits = block.data;
+                    return <div className="p-4 my-2 bg-slate-100 rounded-lg border border-slate-200"><h3 className="font-bold mb-2 primary-text">BLAST Result</h3><BlastViewer data={hits} /></div>;
+                default:
+                    return <p className="text-red-500">Unknown or unsupported content type for direct rendering.</p>;
+            }
+        } catch (renderError) {
+             console.error("Error rendering snapshot content:", renderError);
+             return <div className="text-center text-red-500 p-8">Could not render this content block due to a data error.</div>
+        }
+    };
+    
+    const renderChatSession = (data: { messages: any[], userName: string, avatar: string }) => {
+        // Re-construct the minimal message content for rendering
+        const rehydratedMessages = data.messages.map(msg => ({
+            ...msg,
+            content: <MarkdownRenderer content={msg.rawContent || ''} />
+        }));
+
+        return (
+            <div className="space-y-4">
+                {rehydratedMessages.map((msg) => (
+                    <SnapshotMessage 
+                        key={msg.id} 
+                        message={msg} 
+                        userName={data.userName}
+                        avatar={data.avatar}
+                    />
+                ))}
+            </div>
+        );
+    };
+
+    return (
+        <div className="min-h-screen bg-slate-100 flex flex-col items-center p-4 md:p-8">
+            <div className="w-full max-w-4xl bg-white shadow-lg rounded-lg p-6 md:p-8">
+                <header className="border-b pb-4 mb-6">
+                    <div className="flex items-center gap-3">
+                        <RhesusIcon className="w-8 h-8 primary-text"/>
+                        <div>
+                            <h1 className="text-2xl font-bold text-slate-800">Research Snapshot</h1>
+                            <p className="text-sm text-slate-500">
+                                {snapshot ? `Shared on ${new Date(snapshot.createdAt).toLocaleString()}` : 'Loading...'}
+                            </p>
+                        </div>
+                    </div>
+                </header>
+                
+                <main>
+                    {error && <div className="text-center text-red-500 p-8">{error}</div>}
+                    {snapshot ? (
+                        snapshot.contentBlock.type === ContentType.CHAT_SESSION
+                            ? renderChatSession(snapshot.contentBlock.data)
+                            : renderContentBlock(snapshot.contentBlock)
+                    ) : !error ? (
+                        <div className="text-center text-slate-500 p-8">Loading snapshot...</div>
+                    ) : null}
+                </main>
+            </div>
+            <footer className="mt-6 text-center text-xs text-slate-400">
+                <p>This snapshot was generated by The Dream Lab platform.</p>
+                <a href={window.location.pathname} className="primary-text hover:underline">Return to the main application</a>
+            </footer>
+        </div>
+    );
+};
+
+// A simplified Message component for read-only display
+const SnapshotMessage: React.FC<{ message: any, userName: string, avatar: string }> = ({ message, userName, avatar }) => {
+  const isUser = message.author === MessageAuthor.USER;
+
+  const authorDetails = {
+    [MessageAuthor.USER]: { name: userName, icon: <img src={avatar} alt="User Avatar" className="w-8 h-8 rounded-full object-cover" /> },
+    [MessageAuthor.RHESUS]: { name: 'Dr. Rhesus', icon: <img src="https://envs.sh/icl.jpg" alt="Dr. Rhesus Avatar" className="w-8 h-8 rounded-full object-cover" />},
+    [MessageAuthor.SYSTEM]: { name: 'System', icon: null },
+  };
+  
+  const details = authorDetails[message.author];
+  if (message.author === MessageAuthor.SYSTEM) {
+      return (
+          <div className="text-center text-xs text-slate-500 py-2 italic">{message.rawContent}</div>
+      )
+  }
+
+  return (
+    <div className={`p-4 flex flex-col items-start`}>
+      <div className="flex items-start space-x-4 max-w-full">
+        {details.icon && (
+            <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center`}>
+                {details.icon}
+            </div>
+        )}
+        <div className={`flex flex-col w-full overflow-hidden`}>
+            <span className="font-bold text-slate-800">{details.name}</span>
+            <div className="prose prose-sm md:prose-base max-w-none prose-slate">
+                <MarkdownRenderer content={message.rawContent || ''}/>
+            </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+
+export default SnapshotPage;

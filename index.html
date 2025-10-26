@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dr. Rhesus: Bioinformatics Assistant</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- 3Dmol.js for PDB Viewer -->
+    <script src="https://3dmol.org/build/3Dmol-min.js"></script>
+
+    <style>
+        :root {
+            /* These will be dynamically set by React */
+            --primary-color: #0d9488;
+            --primary-color-hover: #0f766e;
+            --primary-ring-color: #14b8a6;
+            
+            --background-color: #f8fafc; /* slate-50 */
+            --foreground-color: #0f172a; /* slate-900 */
+            --muted-foreground-color: #475569; /* slate-600 */
+            
+            --card-background-color: #ffffff; /* white */
+            --card-foreground-color: #0f172a; /* slate-900 */
+
+            --popover-background-color: #ffffff;
+            --popover-foreground-color: #0f172a;
+
+            --border-color: #e2e8f0; /* slate-200 */
+            --input-background-color: #f1f5f9; /* slate-100 */
+        }
+        
+        html.dark {
+            --primary-color: #14b8a6;
+            --primary-color-hover: #0d9488;
+            --primary-ring-color: #2dd4bf;
+            
+            --background-color: #0f172a; /* slate-900 */
+            --foreground-color: #f8fafc; /* slate-50 */
+            --muted-foreground-color: #94a3b8; /* slate-400 */
+
+            --card-background-color: #1e293b; /* slate-800 */
+            --card-foreground-color: #f8fafc; /* slate-50 */
+
+            --popover-background-color: #1e293b;
+            --popover-foreground-color: #f8fafc;
+
+            --border-color: #334155; /* slate-700 */
+            --input-background-color: #1e293b; /* slate-800 */
+        }
+
+        .primary-text { color: var(--primary-color); }
+        .primary-bg { background-color: var(--primary-color); }
+        .primary-bg-hover:hover { background-color: var(--primary-color-hover); }
+        .primary-border { border-color: var(--primary-color); }
+        .primary-ring { ring-color: var(--primary-ring-color); }
+        .focus\:primary-ring:focus {
+            --tw-ring-color: var(--primary-ring-color);
+        }
+        
+        /* Custom scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: var(--input-background-color); }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        html.dark ::-webkit-scrollbar-thumb { background: #475569; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        html.dark ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+        
+        /* Animation keyframes */
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes messageFadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-out forwards; }
+        .animate-messageFadeIn { animation: messageFadeIn 0.3s ease-out forwards; }
+        
+        /* Gradient animation */
+        @keyframes gradient-x {
+            0%, 100% { background-size: 200% 200%; background-position: left center; }
+            50% { background-size: 200% 200%; background-position: right center; }
+        }
+        .animate-gradient-x {
+            animation: gradient-x 5s ease infinite;
+        }
+
+        /* Subtle background pan animation */
+        @keyframes subtle-pan {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+        .animate-subtle-pan {
+            background-size: 150%;
+            animation: subtle-pan 60s ease-in-out infinite;
+        }
+
+        /* Voice recording pulse animation */
+        @keyframes pulse-strong {
+            0%, 100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+            50% {
+                transform: scale(1.1);
+                opacity: 0.9;
+            }
+        }
+        .animate-pulse-strong {
+            animation: pulse-strong 1.5s ease-in-out infinite;
+        }
+
+        /* Print styles for PDF export */
+        @media print {
+            body {
+                background-color: white !important;
+                color: black !important;
+            }
+            .printable-area {
+                padding: 1rem;
+            }
+            .noprint {
+                display: none !important;
+            }
+            .print-only {
+                display: block !important;
+            }
+            .print-bg-white {
+                background-color: white !important;
+            }
+            .print-text-black {
+                color: black !important;
+            }
+            @page {
+                size: A4;
+                margin: 20mm;
+            }
+
+            /* Styles for printing a single block */
+            body.print-single-block .printable-area > h1,
+            body.print-single-block .printable-area > p:not(.print-only),
+            body.print-single-block .printable-area .space-y-6 > div:not([data-print-target="true"]) {
+                display: none !important;
+            }
+            body.print-single-block .printable-area [data-print-target="true"] {
+                display: block !important;
+                border: none !important;
+                box-shadow: none !important;
+                padding: 0 !important;
+                page-break-inside: avoid;
+            }
+        }
+
+    </style>
+
+    <script type="importmap">
+{
+  "imports": {
+    "@google/genai": "https://esm.sh/@google/genai",
+    "react": "https://esm.sh/react@18.2.0",
+    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+    "react/": "https://esm.sh/react@18.2.0/",
+    "react-dom/": "https://esm.sh/react-dom@18.2.0/",
+    "react-markdown": "https://esm.sh/react-markdown@9.0.1",
+    "remark-gfm": "https://esm.sh/remark-gfm@4.0.0",
+    "recharts": "https://esm.sh/recharts@2.12.7"
+  }
+}
+</script>
+    
+    <!-- Babel for in-browser JSX/TSX transpilation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<link rel="stylesheet" href="/index.css">
+</head>
+<body class="bg-[var(--background-color)] text-[var(--foreground-color)]">
+    <div id="root"></div>
+    <script type="text/babel" data-type="module" data-presets="react,typescript" data-src="./index.tsx"></script>
+<script type="module" src="/index.tsx"></script>
+</body>
+</html>

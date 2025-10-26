@@ -1,0 +1,16 @@
+{
+  "functions": {
+    "api/blastp.ts": {
+      "maxDuration": 60
+    },
+    "api/uniprot.ts": {
+      "maxDuration": 30
+    },
+    "api/msa.ts": {
+      "maxDuration": 60
+    },
+    "api/phylo.ts": {
+      "maxDuration": 60
+    }
+  }
+}

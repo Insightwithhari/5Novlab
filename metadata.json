@@ -1,0 +1,7 @@
+{
+  "name": "Dr. Rhesus: Bioinformatics Assistant",
+  "description": "An expert bioinformatics research assistant specializing in protein design. It can find protein structures, visualize them, perform in-silico mutations, and conduct literature searches.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
