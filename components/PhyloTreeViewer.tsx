@@ -3,9 +3,18 @@ import { ClipboardDocumentIcon, CheckIcon } from './icons';
 
 interface PhyloTreeViewerProps {
     treeData: string; // Newick format string
+    service?: string | null;
+    alignmentJobId?: string | null;
+    treeJobId?: string | null;
+    externalUrl?: string | null;
 }
 
-const PhyloTreeViewer: React.FC<PhyloTreeViewerProps> = ({ treeData }) => {
+const SERVICE_LABELS: Record<string, string> = {
+    clustalo: 'Clustal Omega (Guide Tree)',
+    simple_phylogeny: 'Simple Phylogeny (ClustalW Neighbour-joining)',
+};
+
+const PhyloTreeViewer: React.FC<PhyloTreeViewerProps> = ({ treeData, service, alignmentJobId, treeJobId, externalUrl }) => {
     const [copied, setCopied] = useState(false);
 
     const handleCopy = () => {
@@ -13,6 +22,9 @@ const PhyloTreeViewer: React.FC<PhyloTreeViewerProps> = ({ treeData }) => {
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
     };
+
+    const serviceLabel = service ? SERVICE_LABELS[service] ?? service : null;
+    const showAlignmentJob = alignmentJobId && treeJobId && alignmentJobId !== treeJobId;
 
     return (
         <div className="mt-2 p-4 bg-[var(--input-background-color)] rounded-lg border border-[var(--border-color)]">
@@ -23,6 +35,37 @@ const PhyloTreeViewer: React.FC<PhyloTreeViewerProps> = ({ treeData }) => {
                     {copied ? 'Copied!' : 'Copy Data'}
                 </button>
             </div>
+            {serviceLabel && (
+                <p className="text-xs text-[var(--muted-foreground-color)] mb-2">
+                    Generated via <span className="font-semibold text-[var(--card-foreground-color)]">{serviceLabel}</span>
+                </p>
+            )}
+            {(showAlignmentJob || treeJobId) && (
+                <div className="text-xs text-[var(--muted-foreground-color)] mb-3 space-y-1">
+                    {showAlignmentJob && (
+                        <p>
+                            Alignment job: <span className="font-mono text-[var(--card-foreground-color)]">{alignmentJobId}</span>
+                        </p>
+                    )}
+                    {treeJobId && (
+                        <p>
+                            Tree job:
+                            {externalUrl ? (
+                                <a
+                                    href={externalUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="ml-1 font-mono primary-text hover:underline"
+                                >
+                                    {treeJobId}
+                                </a>
+                            ) : (
+                                <span className="ml-1 font-mono text-[var(--card-foreground-color)]">{treeJobId}</span>
+                            )}
+                        </p>
+                    )}
+                </div>
+            )}
             <div className="p-3 bg-slate-100 dark:bg-slate-900 rounded-md text-xs mb-2">
                 <p>This is a phylogenetic tree in Newick format. You can copy this data and paste it into a visualization tool like <a href="https://itol.embl.de/" target="_blank" rel="noopener noreferrer" className="primary-text font-semibold hover:underline">iTOL</a> or <a href="http://etetoolkit.org/treeview/" target="_blank" rel="noopener noreferrer" className="primary-text font-semibold hover:underline">ETE Tree Viewer</a> to see the graphical representation.</p>
             </div>

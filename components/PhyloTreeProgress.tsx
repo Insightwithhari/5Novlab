@@ -6,15 +6,54 @@ interface PhyloTreeProgressProps {
     status: Status;
     jobId?: string | null;
     errorMessage?: string | null;
+    service?: string | null;
+    stage?: string | null;
+    externalService?: string | null;
+    externalId?: string | null;
+    externalUrl?: string | null;
+    alignmentJobId?: string | null;
+    treeJobId?: string | null;
 }
 
 const statusMessages: Record<Status, string> = {
     submitting: 'Submitting sequences to EMBL-EBI for tree generation...',
-    polling: 'Generating phylogenetic tree (this may take a few minutes)...',
+    polling: 'Running remote phylogenetic analysis...',
     error: 'An error occurred during tree generation.'
 };
 
-const PhyloTreeProgress: React.FC<PhyloTreeProgressProps> = ({ status, jobId, errorMessage }) => {
+const SERVICE_LABELS: Record<string, string> = {
+    clustalo: 'Clustal Omega (Guide Tree)',
+    simple_phylogeny: 'Simple Phylogeny (ClustalW Neighbour-joining)',
+};
+
+const STAGE_LABELS: Record<string, string> = {
+    alignment: 'Aligning sequences with Clustal Omega (MSA stage)...',
+    tree: 'Inferring phylogenetic relationships...',
+};
+
+const PhyloTreeProgress: React.FC<PhyloTreeProgressProps> = ({
+    status,
+    jobId,
+    errorMessage,
+    service,
+    stage,
+    externalService,
+    externalId,
+    externalUrl,
+    alignmentJobId,
+    treeJobId,
+}) => {
+    const serviceLabel = service ? SERVICE_LABELS[service] ?? service : null;
+    const externalServiceLabel = externalService ? SERVICE_LABELS[externalService] ?? externalService : null;
+    const stageLabel = stage ? STAGE_LABELS[stage] ?? null : null;
+    const currentJobId = externalId ?? jobId ?? null;
+    const jobHref = externalUrl ?? (currentJobId && externalService === 'clustalo'
+        ? `https://www.ebi.ac.uk/Tools/services/rest/clustalo/result/${currentJobId}/${stage === 'alignment' ? 'fa' : 'phylotree'}`
+        : externalService === 'simple_phylogeny' && currentJobId
+            ? `https://www.ebi.ac.uk/Tools/services/rest/simple_phylogeny/result/${currentJobId}/tree`
+            : undefined);
+    const showAlignmentReference = alignmentJobId && treeJobId && alignmentJobId !== treeJobId;
+
     return (
         <div className="mt-2 p-4 bg-[var(--input-background-color)] rounded-lg border border-[var(--border-color)]">
             <h3 className="text-lg font-semibold primary-text pb-2 flex items-center gap-2">
@@ -33,17 +72,35 @@ const PhyloTreeProgress: React.FC<PhyloTreeProgressProps> = ({ status, jobId, er
                     )}
                     <div>
                         <p className="font-semibold text-[var(--foreground-color)]">{statusMessages[status]}</p>
-                        {jobId && (
+                        {serviceLabel && (
                             <p className="text-xs text-[var(--muted-foreground-color)] mt-1">
-                                Job ID:
-                                <a 
-                                    href={`https://www.ebi.ac.uk/Tools/services/rest/clustalo/result/${jobId}/phylotree`}
-                                    target="_blank" 
-                                    rel="noopener noreferrer"
-                                    className="ml-1 font-mono primary-text hover:underline"
-                                >
-                                    {jobId}
-                                </a>
+                                Service: <span className="font-semibold text-[var(--foreground-color)]">{serviceLabel}</span>
+                            </p>
+                        )}
+                        {stageLabel && (
+                            <p className="text-xs text-[var(--muted-foreground-color)] mt-1">{stageLabel}</p>
+                        )}
+                        {currentJobId && (
+                            <p className="text-xs text-[var(--muted-foreground-color)] mt-1">
+                                Current job:
+                                {jobHref ? (
+                                    <a
+                                        href={jobHref}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="ml-1 font-mono primary-text hover:underline"
+                                    >
+                                        {currentJobId}
+                                    </a>
+                                ) : (
+                                    <span className="ml-1 font-mono text-[var(--foreground-color)]">{currentJobId}</span>
+                                )}
+                                {externalServiceLabel && <span className="ml-1">({externalServiceLabel})</span>}
+                            </p>
+                        )}
+                        {showAlignmentReference && (
+                            <p className="text-xs text-[var(--muted-foreground-color)] mt-1">
+                                Alignment job: <span className="font-mono text-[var(--foreground-color)]">{alignmentJobId}</span>
                             </p>
                         )}
                     </div>

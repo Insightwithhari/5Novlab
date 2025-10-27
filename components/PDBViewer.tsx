@@ -8,19 +8,56 @@ interface PDBViewerProps {
   uniprotId?: string;
 }
 
-// Helper to fetch with a timeout to prevent indefinite loading states
-const fetchWithTimeout = async (resource: RequestInfo, options: RequestInit = {}, timeout = 15000) => {
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+interface FetchWithTimeoutOptions extends RequestInit {
+  timeout?: number;
+  retries?: number;
+  retryDelayMs?: number;
+}
+
+// Helper to fetch with a timeout and light retry support so larger AlphaFold files have time to stream
+const fetchWithTimeout = async (
+  resource: RequestInfo,
+  options: FetchWithTimeoutOptions = {}
+) => {
+  const { timeout = 45000, retries = 1, retryDelayMs = 1000, ...fetchOptions } = options;
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), timeout);
+
     try {
-        const response = await fetch(resource, {
-            ...options,
-            signal: controller.signal
-        });
-        return response;
+      const response = await fetch(resource, {
+        ...fetchOptions,
+        signal: controller.signal,
+      });
+
+      if (!response.ok && attempt < retries) {
+        const retryableStatus = response.status === 408 || response.status === 429 || response.status >= 500;
+        if (retryableStatus) {
+          await delay(retryDelayMs * (attempt + 1));
+          continue;
+        }
+      }
+
+      return response;
+    } catch (error: any) {
+      const isAbortError = error && typeof error === 'object' && error.name === 'AbortError';
+      const isNetworkError = error instanceof TypeError;
+
+      if (attempt < retries && (isAbortError || isNetworkError)) {
+        await delay(retryDelayMs * (attempt + 1));
+        continue;
+      }
+
+      throw error;
     } finally {
-        clearTimeout(id);
+      clearTimeout(id);
     }
+  }
+
+  throw new Error('fetchWithTimeout exhausted retries without returning a response.');
 };
 
 
@@ -37,132 +74,148 @@ const PDBViewer: React.FC<PDBViewerProps> = ({ pdbId, uniprotId }) => {
   } | null>(null);
 
   useEffect(() => {
-    let viewer: any = null;
     let isMounted = true;
+    let viewerInstance: any = null;
 
-    const cleanup = () => {
-      isMounted = false;
-      if (viewer && typeof viewer.clear === 'function') {
-        viewer.clear();
+    const resetViewer = () => {
+      if (viewerInstance) {
+        try {
+          viewerInstance.removeAllModels();
+          viewerInstance.clear();
+        } catch (viewerError) {
+          console.warn('3Dmol reset failed:', viewerError);
+        }
+        viewerInstance = null;
+      }
+      if (viewerRef.current) {
+        viewerRef.current.innerHTML = '';
       }
     };
 
-    if (typeof $3Dmol === 'undefined' || !$3Dmol) {
-        setError("3D viewer library (3Dmol.js) failed to load. Please check your network connection and refresh.");
-        setIsLoading(false);
-        return cleanup;
-    }
-
-    if (!viewerRef.current) {
-        setIsLoading(false);
-        return cleanup;
-    }
-
-    const element = viewerRef.current;
-    const config = { backgroundColor: 'black' };
-    viewer = $3Dmol.createViewer(element, config);
-
     const loadStructure = async () => {
-        if (!isMounted) return;
-        setIsLoading(true);
-        setError(null);
-        setStructureInfo(null);
-        
-        try {
-            if (pdbId) {
-                const info = {
-                    fetchUrl: `https://files.rcsb.org/view/${pdbId}.pdb`,
-                    downloadUrl: `https://files.rcsb.org/view/${pdbId}.pdb`,
-                    shareUrl: `https://www.rcsb.org/structure/${pdbId}`,
-                    downloadFileName: `${pdbId}.pdb`,
-                    displayId: pdbId,
-                    sourceName: 'RCSB PDB',
-                };
-                setStructureInfo(info);
-                const pdbResponse = await fetchWithTimeout(info.fetchUrl);
-                 if (!pdbResponse.ok) {
-                    throw new Error(`Failed to fetch PDB data for ${pdbId}. Status: ${pdbResponse.status}`);
-                }
-                const pdbData = await pdbResponse.text();
-                if (!isMounted) return;
-                viewer.addModel(pdbData, 'pdb');
+      setIsLoading(true);
+      setError(null);
+      setStructureInfo(null);
+      resetViewer();
 
-            } else if (uniprotId) {
-                const apiResponse = await fetchWithTimeout(`https://alphafold.ebi.ac.uk/api/prediction/${uniprotId}`);
-                if (!apiResponse.ok) {
-                    if (apiResponse.status === 404) {
-                        throw new Error(`No AlphaFold prediction found for UniProt ID: ${uniprotId}. The ID might be incorrect or reference a protein not modeled by AlphaFold.`);
-                    }
-                    throw new Error(`Failed to fetch AlphaFold metadata. Status: ${apiResponse.status} ${apiResponse.statusText}`);
-                }
-                const data = await apiResponse.json();
-                
-                const entries = Array.isArray(data) ? data.filter(entry => entry && entry.pdbUrl && entry.uniprotStart && entry.uniprotEnd) : [];
-                if (entries.length === 0) {
-                     throw new Error(`No valid AlphaFold prediction entries with PDB URLs found for UniProt ID: ${uniprotId}.`);
-                }
+      if (!viewerRef.current) return;
 
-                let bestEntry = entries[0];
-                let displayIdSuffix = '';
+      viewerInstance = $3Dmol.createViewer(
+        viewerRef.current,
+        { backgroundColor: 'transparent' }
+      );
 
-                if (entries.length > 1) {
-                    // When multiple fragments are returned, select the longest one as a proxy for the most significant domain.
-                    entries.sort((a, b) => {
-                        const lengthA = (a.uniprotEnd || 0) - (a.uniprotStart || 0);
-                        const lengthB = (b.uniprotEnd || 0) - (b.uniprotStart || 0);
-                        return lengthB - lengthA; // Sort descending by length
-                    });
-                    bestEntry = entries[0];
-                    displayIdSuffix = ` (longest of ${entries.length} fragments)`;
-                }
+      try {
+        if (pdbId) {
+          const info = {
+            fetchUrl: `https://files.rcsb.org/view/${pdbId}.pdb`,
+            downloadUrl: `https://files.rcsb.org/view/${pdbId}.pdb`,
+            shareUrl: `https://www.rcsb.org/structure/${pdbId}`,
+            downloadFileName: `${pdbId}.pdb`,
+            displayId: pdbId,
+            sourceName: 'RCSB PDB',
+          };
+          setStructureInfo(info);
 
-                const info = {
-                    downloadUrl: bestEntry.pdbUrl,
-                    shareUrl: `https://alphafold.ebi.ac.uk/entry/${bestEntry.uniprotAccession || uniprotId}`,
-                    downloadFileName: `AF-${uniprotId}.pdb`,
-                    displayId: uniprotId + displayIdSuffix,
-                    sourceName: 'AlphaFold DB',
-                };
-                 if (!isMounted) return;
-                setStructureInfo(info);
-
-                const pdbResponse = await fetchWithTimeout(bestEntry.pdbUrl);
-                if (!pdbResponse.ok) {
-                    throw new Error(`Failed to fetch PDB data from ${bestEntry.pdbUrl}. Status: ${pdbResponse.status}`);
-                }
-                const pdbData = await pdbResponse.text();
-
-                if (!isMounted) return;
-                viewer.addModel(pdbData, 'pdb');
-
-            } else {
-                throw new Error("No PDB ID or UniProt ID was provided to the viewer.");
+          const pdbResponse = await fetchWithTimeout(info.fetchUrl, {
+            timeout: 45000,
+            retries: 2,
+            retryDelayMs: 1500,
+          });
+          if (!pdbResponse.ok) {
+            throw new Error(`Failed to fetch PDB data for ${pdbId}. Status: ${pdbResponse.status}`);
+          }
+          const pdbData = await pdbResponse.text();
+          if (!isMounted) return;
+          viewerInstance.addModel(pdbData, 'pdb');
+        } else if (uniprotId) {
+          const apiResponse = await fetchWithTimeout(`https://alphafold.ebi.ac.uk/api/prediction/${uniprotId}`, {
+            timeout: 20000,
+            retries: 2,
+            retryDelayMs: 1200,
+          });
+          if (!apiResponse.ok) {
+            if (apiResponse.status === 404) {
+              throw new Error(`No AlphaFold prediction found for UniProt ID: ${uniprotId}. The ID might be incorrect or reference a protein not modeled by AlphaFold.`);
             }
+            throw new Error(`Failed to fetch AlphaFold metadata. Status: ${apiResponse.status} ${apiResponse.statusText}`);
+          }
+          const data = await apiResponse.json();
 
-            if (!isMounted) return;
-            viewer.setStyle({}, { cartoon: { color: 'spectrum' } });
-            viewer.zoomTo();
-            viewer.render(() => {
-                if (viewer && typeof viewer.zoom === 'function') viewer.zoom(0.8);
+          const entries = Array.isArray(data) ? data.filter(entry => entry && entry.pdbUrl && entry.uniprotStart && entry.uniprotEnd) : [];
+          if (entries.length === 0) {
+            throw new Error(`No valid AlphaFold prediction entries with PDB URLs found for UniProt ID: ${uniprotId}.`);
+          }
+
+          let bestEntry = entries[0];
+          let displayIdSuffix = '';
+
+          if (entries.length > 1) {
+            // When multiple fragments are returned, select the longest one as a proxy for the most significant domain.
+            entries.sort((a, b) => {
+              const lengthA = (a.uniprotEnd || 0) - (a.uniprotStart || 0);
+              const lengthB = (b.uniprotEnd || 0) - (b.uniprotStart || 0);
+              return lengthB - lengthA; // Sort descending by length
             });
+            bestEntry = entries[0];
+            displayIdSuffix = ` (longest of ${entries.length} fragments)`;
+          }
 
-        } catch (err: any) {
-            console.error("Structure fetch error:", err);
-            if (isMounted) {
-                if (err.name === 'AbortError') {
-                    setError('The request to AlphaFold timed out. The server may be busy or down. Please try again later.');
-                } else {
-                    setError(err.message || `An unknown error occurred while loading the structure.`);
-                }
-            }
-        } finally {
-            if (isMounted) setIsLoading(false);
+          const info = {
+            downloadUrl: bestEntry.pdbUrl,
+            shareUrl: `https://alphafold.ebi.ac.uk/entry/${bestEntry.uniprotAccession || uniprotId}`,
+            downloadFileName: `AF-${uniprotId}.pdb`,
+            displayId: uniprotId + displayIdSuffix,
+            sourceName: 'AlphaFold DB',
+          };
+          if (!isMounted) return;
+          setStructureInfo(info);
+
+          const pdbResponse = await fetchWithTimeout(bestEntry.pdbUrl, {
+            timeout: 60000,
+            retries: 2,
+            retryDelayMs: 1500,
+          });
+          if (!pdbResponse.ok) {
+            throw new Error(`Failed to fetch PDB data from ${bestEntry.pdbUrl}. Status: ${pdbResponse.status}`);
+          }
+          const pdbData = await pdbResponse.text();
+
+          if (!isMounted) return;
+          viewerInstance.addModel(pdbData, 'pdb');
+        } else {
+          throw new Error('No PDB ID or UniProt ID was provided to the viewer.');
         }
+
+        if (!isMounted) return;
+        viewerInstance.setStyle({}, { cartoon: { color: 'spectrum' } });
+        viewerInstance.zoomTo();
+        viewerInstance.render(() => {
+          if (viewerInstance && typeof viewerInstance.zoom === 'function') {
+            viewerInstance.zoom(0.8);
+          }
+        });
+      } catch (err: any) {
+        console.error('Structure fetch error:', err);
+        if (isMounted) {
+          if (err.name === 'AbortError') {
+            setError('The request to AlphaFold timed out. The server may be busy or down. Please try again later.');
+          } else {
+            setError(err.message || 'An unknown error occurred while loading the structure.');
+          }
+        }
+        resetViewer();
+      } finally {
+        if (isMounted) setIsLoading(false);
+      }
     };
 
     loadStructure();
 
-    return cleanup;
+    return () => {
+      isMounted = false;
+      resetViewer();
+    };
   }, [pdbId, uniprotId]);
   
   const handleDownload = () => {
