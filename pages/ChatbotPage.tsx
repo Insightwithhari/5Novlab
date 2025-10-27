@@ -454,7 +454,6 @@ const ChatbotPage: React.FC = () => {
       };
       
       setMessages(prev => [...prev, newUserMessage]);
-      setIsLoading(true);
       setInput('');
       setReplyingTo(null);
       
@@ -466,6 +465,30 @@ const ChatbotPage: React.FC = () => {
               : { id: 'general', title, type: 'general' };
           setRecentChats(prev => [newChat, ...prev.filter(c => c.id !== newChat.id)]);
       }
+
+      const jobIdRegex = /ncbiblast-[a-z0-9-]+/i;
+      const jobIdMatch = finalPrompt.match(jobIdRegex);
+      if (jobIdMatch) {
+          await handleFetchBlastJob(jobIdMatch[0]);
+          return;
+      }
+
+      const lowerPrompt = finalPrompt.toLowerCase();
+      const fetchBlastIntent = /(fetch|get|retrieve|pull|show)\b.*\bblast\b.*job\s*-?\s*id/.test(lowerPrompt);
+      if (fetchBlastIntent) {
+          const helperText =
+            "Absolutely — share the EMBL-EBI job ID (for example `ncbiblast-...`) or use `/fetchblast <jobId>` and I'll retrieve the latest BLAST results right away.";
+          const guidanceMessage: Message = {
+              id: `rhesus-${Date.now()}`,
+              author: MessageAuthor.RHESUS,
+              content: <MarkdownRenderer content={helperText} />,
+              rawContent: helperText,
+          };
+          setMessages(prev => [...prev, guidanceMessage]);
+          return;
+      }
+
+      setIsLoading(true);
 
       try {
           const fullResponse = await sendMessage(chat, finalPrompt);
