@@ -27,12 +27,37 @@ export interface Message {
   };
 }
 
+export type BlastAlignmentState = 'match' | 'positive' | 'mismatch' | 'gap';
+
+export interface BlastAlignmentToken {
+  queryResidue: string;
+  subjectResidue: string;
+  state: BlastAlignmentState;
+  midline?: string;
+  queryPosition?: number;
+  subjectPosition?: number;
+}
+
 export interface BlastHit {
-    accession: string;
-    description: string;
-    score: number;
-    e_value: string;
-    identity: number;
+  accession: string;
+  description?: string;
+  score?: number;
+  e_value?: string | number;
+  identity?: number; // fraction 0..1
+  // optional additional metadata returned by various BLAST providers
+  length?: number;
+  coverage?: number;
+  queryCoverage?: number;
+  organism?: string;
+  alignment?: string;
+  sequence?: string;
+  alignmentTokens?: BlastAlignmentToken[];
+  alignmentRange?: {
+    queryFrom?: number;
+    queryTo?: number;
+    subjectFrom?: number;
+    subjectTo?: number;
+  };
 }
 
 // Recent Chat for Sidebar
