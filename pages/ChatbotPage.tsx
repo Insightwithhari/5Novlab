@@ -24,6 +24,21 @@ const Caption: React.FC<{ text: string }> = ({ text }) => (
     <p className="text-xs text-center font-semibold text-[var(--muted-foreground-color)] mb-2 uppercase tracking-wider">{text}</p>
 );
 
+const PHYLO_SERVICE_LABELS: Record<string, string> = {
+    clustalo: 'Clustal Omega (Guide Tree)',
+    simple_phylogeny: 'Simple Phylogeny (ClustalW Neighbour-joining)',
+};
+
+type PhyloProgressMeta = {
+    service?: string;
+    stage?: string;
+    externalService?: string;
+    externalId?: string;
+    externalUrl?: string;
+    alignmentJobId?: string;
+    treeJobId?: string;
+};
+
 const ChatbotPage: React.FC = () => {
   const { 
       projects, setProjects, pipelines, setApiStatus, 
@@ -139,10 +154,38 @@ const ChatbotPage: React.FC = () => {
                         contentWithCaption = (<div className="p-4 bg-[var(--input-background-color)] rounded-lg border border-[var(--border-color)]"><Caption text="MSA Result" /><MSAViewer alignment={data.result} /></div>);
                         break;
                     case ContentType.PHYLO_TREE_PROGRESS:
-                        contentWithCaption = (<PhyloTreeProgress status={data.status} jobId={data.jobId} errorMessage={data.errorMessage} />);
+                        contentWithCaption = (
+                            <PhyloTreeProgress
+                                status={data.status}
+                                jobId={data.jobId}
+                                errorMessage={data.errorMessage}
+                                service={data.service}
+                                stage={data.stage}
+                                externalService={data.externalService}
+                                externalId={data.externalId}
+                                externalUrl={data.externalUrl}
+                                alignmentJobId={data.alignmentJobId}
+                                treeJobId={data.treeJobId}
+                            />
+                        );
                         break;
                     case ContentType.PHYLO_TREE_RESULT:
-                        contentWithCaption = (<div className="p-4 bg-[var(--input-background-color)] rounded-lg border border-[var(--border-color)]"><Caption text="Phylogenetic Tree Result" /><PhyloTreeViewer treeData={data.result} /></div>);
+                        {
+                            const serviceLabel = data.service ? PHYLO_SERVICE_LABELS[data.service] ?? data.service : null;
+                            const captionText = serviceLabel ? `Phylogenetic Tree Result — ${serviceLabel}` : 'Phylogenetic Tree Result';
+                            contentWithCaption = (
+                                <div className="p-4 bg-[var(--input-background-color)] rounded-lg border border-[var(--border-color)]">
+                                    <Caption text={captionText} />
+                                    <PhyloTreeViewer
+                                        treeData={data.result}
+                                        service={data.service}
+                                        alignmentJobId={data.alignmentJobId}
+                                        treeJobId={data.treeJobId}
+                                        externalUrl={data.externalUrl}
+                                    />
+                                </div>
+                            );
+                        }
                         break;
                     // FIX: Updated to match the corrected enum member name.
                     case ContentType.ALPHA_FOLD_VIEWER:
@@ -338,54 +381,126 @@ const ChatbotPage: React.FC = () => {
         pollIntervalsRef.current[jobId] = { intervalId, timeoutId };
     }, [stopPolling, renderRhesusContent]);
 
-    const startPhyloPolling = useCallback((jobId: string, messageId: string) => {
+    const startPhyloPolling = useCallback((initialJobId: string, messageId: string, initialMeta: PhyloProgressMeta = {}) => {
+        let currentJobId = initialJobId;
+        let latestMeta: PhyloProgressMeta = { ...initialMeta };
+        let isPolling = false;
+
+        const updateProgressMessage = (
+            status: 'submitting' | 'polling' | 'error',
+            extras?: PhyloProgressMeta & { errorMessage?: string; jobId?: string }
+        ) => {
+            let errorMessage: string | undefined;
+            let overrideJobId: string | undefined;
+            if (extras) {
+                errorMessage = extras.errorMessage;
+                overrideJobId = extras.jobId;
+                const { errorMessage: _ignoredError, jobId: _ignoredJob, ...meta } = extras;
+                latestMeta = { ...latestMeta, ...meta };
+            }
+
+            const payload = {
+                status,
+                jobId: overrideJobId ?? currentJobId,
+                service: latestMeta.service,
+                stage: latestMeta.stage,
+                externalService: latestMeta.externalService,
+                externalId: latestMeta.externalId,
+                externalUrl: latestMeta.externalUrl,
+                alignmentJobId: latestMeta.alignmentJobId,
+                treeJobId: latestMeta.treeJobId,
+                errorMessage,
+            };
+
+            const rawContent = JSON.stringify({
+                tool_calls: [{ type: ContentType.PHYLO_TREE_PROGRESS, data: payload }],
+            });
+            setMessages(prev => prev.map(m => m.id === messageId ? { ...m, rawContent, content: renderRhesusContent(rawContent) } : m));
+        };
+
+        const createTimeout = (jobToken: string) => window.setTimeout(() => {
+            if (pollIntervalsRef.current[jobToken]) {
+                stopPolling(jobToken);
+                updateProgressMessage('error', { jobId: jobToken, errorMessage: 'Polling timed out after 5 minutes.' });
+            }
+        }, 300000);
+
+        let timeoutId = createTimeout(currentJobId);
+
         const intervalId = window.setInterval(async () => {
+            if (isPolling) return;
+            isPolling = true;
             try {
                 const pollResponse = await fetch('/api/phylo', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ jobId })
+                    body: JSON.stringify({ jobId: currentJobId })
                 });
 
                 if (!pollResponse.ok) throw new Error(`Polling failed with status: ${pollResponse.status}`);
                 const pollData = await pollResponse.json();
-                
+
+                if (typeof pollData.jobId === 'string' && pollData.jobId !== currentJobId) {
+                    const existingEntry = pollIntervalsRef.current[currentJobId];
+                    const newTimeoutId = createTimeout(pollData.jobId);
+                    if (existingEntry) {
+                        clearTimeout(existingEntry.timeoutId);
+                        existingEntry.timeoutId = newTimeoutId;
+                        pollIntervalsRef.current[pollData.jobId] = existingEntry;
+                    } else {
+                        pollIntervalsRef.current[pollData.jobId] = { intervalId, timeoutId: newTimeoutId };
+                    }
+                    delete pollIntervalsRef.current[currentJobId];
+                    timeoutId = newTimeoutId;
+                    currentJobId = pollData.jobId;
+                }
+
+                latestMeta = {
+                    ...latestMeta,
+                    service: pollData.service ?? latestMeta.service,
+                    stage: pollData.stage ?? latestMeta.stage,
+                    externalService: pollData.externalService ?? latestMeta.externalService,
+                    externalId: pollData.externalId ?? latestMeta.externalId,
+                    externalUrl: pollData.externalUrl ?? latestMeta.externalUrl,
+                    alignmentJobId: pollData.alignmentJobId ?? latestMeta.alignmentJobId,
+                    treeJobId: pollData.treeJobId ?? latestMeta.treeJobId,
+                };
+
                 if (pollData.status === 'FINISHED') {
-                    stopPolling(jobId);
+                    stopPolling(currentJobId);
+                    const serviceLabel = latestMeta.service ? PHYLO_SERVICE_LABELS[latestMeta.service] ?? latestMeta.service : null;
+                    const prose = serviceLabel ? `The phylogenetic tree has been generated using ${serviceLabel}.` : 'The phylogenetic tree has been generated.';
                     const finalRawContent = JSON.stringify({
-                        prose: "The phylogenetic tree has been generated.",
-                        tool_calls: [{ type: ContentType.PHYLO_TREE_RESULT, data: { result: pollData.result } }]
+                        prose,
+                        tool_calls: [{
+                            type: ContentType.PHYLO_TREE_RESULT,
+                            data: {
+                                result: pollData.result,
+                                service: latestMeta.service,
+                                alignmentJobId: latestMeta.alignmentJobId,
+                                treeJobId: latestMeta.treeJobId,
+                                externalUrl: latestMeta.externalUrl,
+                            },
+                        }],
                     });
                     setMessages(prev => prev.map(m => m.id === messageId ? { ...m, rawContent: finalRawContent, content: renderRhesusContent(finalRawContent) } : m));
 
                 } else if (pollData.status === 'FAILURE') {
-                    stopPolling(jobId);
-                    const errorRawContent = JSON.stringify({
-                        tool_calls: [{ type: ContentType.PHYLO_TREE_PROGRESS, data: { status: 'error', jobId, errorMessage: pollData.message } }]
-                    });
-                    setMessages(prev => prev.map(m => m.id === messageId ? { ...m, rawContent: errorRawContent, content: renderRhesusContent(errorRawContent) } : m));
+                    stopPolling(currentJobId);
+                    updateProgressMessage('error', { errorMessage: pollData.message });
+                } else {
+                    updateProgressMessage('polling');
                 }
             } catch (error: any) {
-                stopPolling(jobId);
-                 const errorRawContent = JSON.stringify({
-                    tool_calls: [{ type: ContentType.PHYLO_TREE_PROGRESS, data: { status: 'error', jobId, errorMessage: error.message } }]
-                });
-                setMessages(prev => prev.map(m => m.id === messageId ? { ...m, rawContent: errorRawContent, content: renderRhesusContent(errorRawContent) } : m));
+                stopPolling(currentJobId);
+                updateProgressMessage('error', { errorMessage: error.message });
+            } finally {
+                isPolling = false;
             }
         }, 5000);
 
-        const timeoutId = window.setTimeout(() => {
-            if (pollIntervalsRef.current[jobId]) {
-                stopPolling(jobId);
-                const timeoutRawContent = JSON.stringify({
-                    tool_calls: [{ type: ContentType.PHYLO_TREE_PROGRESS, data: { status: 'error', jobId, errorMessage: 'Polling timed out after 5 minutes.' } }]
-                });
-                setMessages(prev => prev.map(m => m.id === messageId ? { ...m, rawContent: timeoutRawContent, content: renderRhesusContent(timeoutRawContent) } : m));
-            }
-        }, 300000); // 5 minutes
-
-        pollIntervalsRef.current[jobId] = { intervalId, timeoutId };
-    }, [stopPolling, renderRhesusContent]);
+        pollIntervalsRef.current[currentJobId] = { intervalId, timeoutId };
+    }, [renderRhesusContent, setMessages, stopPolling]);
     
     const handleFetchBlastJob = useCallback(async (jobId: string) => {
         if (!jobId) return;
@@ -646,10 +761,15 @@ const ChatbotPage: React.FC = () => {
               setMessages(prev => [...prev, progressMessage]);
 
               try {
+                  const phyloRequestPayload: Record<string, any> = { sequences: phyloToolCall.data.sequences };
+                  if (phyloToolCall.data.method) {
+                      phyloRequestPayload.method = phyloToolCall.data.method;
+                  }
+
                   const submitApiResponse = await fetch('/api/phylo', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ sequences: phyloToolCall.data.sequences })
+                      body: JSON.stringify(phyloRequestPayload)
                   });
 
                   if (!submitApiResponse.ok) {
@@ -657,12 +777,40 @@ const ChatbotPage: React.FC = () => {
                       throw new Error(errorBody.error || `Phylogenetic tree service failed: ${submitApiResponse.statusText}`);
                   }
 
-                  const { jobId } = await submitApiResponse.json();
+                  const {
+                      jobId,
+                      service,
+                      stage,
+                      externalService,
+                      externalId,
+                      externalUrl,
+                      alignmentJobId,
+                      treeJobId
+                  } = await submitApiResponse.json();
                   if (!jobId) throw new Error("Did not receive a Job ID from the server.");
-                  
-                  const pollingProgressRawContent = JSON.stringify({ tool_calls: [{ type: ContentType.PHYLO_TREE_PROGRESS, data: { status: 'polling', jobId } }] });
+
+                  const initialMeta: PhyloProgressMeta = {
+                      service,
+                      stage,
+                      externalService,
+                      externalId,
+                      externalUrl,
+                      alignmentJobId,
+                      treeJobId,
+                  };
+
+                  const pollingProgressRawContent = JSON.stringify({
+                      tool_calls: [{
+                          type: ContentType.PHYLO_TREE_PROGRESS,
+                          data: {
+                              status: 'polling',
+                              jobId,
+                              ...initialMeta,
+                          },
+                      }],
+                  });
                   setMessages(prev => prev.map(m => m.id === progressMessageId ? { ...m, rawContent: pollingProgressRawContent, content: renderRhesusContent(pollingProgressRawContent) } : m));
-                  startPhyloPolling(jobId, progressMessageId);
+                  startPhyloPolling(jobId, progressMessageId, initialMeta);
 
               } catch (phyloError: any) {
                   const errorRawContent = JSON.stringify({ tool_calls: [{ type: ContentType.PHYLO_TREE_PROGRESS, data: { status: 'error', errorMessage: phyloError.message } }] });
