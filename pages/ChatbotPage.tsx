@@ -130,6 +130,74 @@ const ChatbotPage: React.FC = () => {
                     case ContentType.PDB_VIEWER:
                         contentWithCaption = (<div><Caption text={`3D Structure: ${data.pdbId}`} /><PDBViewer pdbId={data.pdbId} /></div>);
                         break;
+                    case ContentType.EDIT_PDB: {
+                        const viewerProps = { pdbId: data.pdbId, uniprotId: data.uniprotId };
+                        if (!viewerProps.pdbId && !viewerProps.uniprotId) {
+                            contentWithCaption = (
+                                <div className="p-4 bg-[var(--input-background-color)] rounded-lg border border-[var(--border-color)] text-xs space-y-2">
+                                    <p className="font-semibold">Structure editor request</p>
+                                    <p className="text-[var(--muted-foreground-color)]">No PDB ID or UniProt accession was supplied, so the interactive viewer could not be opened automatically.</p>
+                                </div>
+                            );
+                        } else {
+                            const captionLabel = viewerProps.pdbId ? `Editable Structure: ${viewerProps.pdbId}` : viewerProps.uniprotId ? `Editable Structure: ${viewerProps.uniprotId}` : 'Editable Structure';
+                            contentWithCaption = (
+                                <div className="space-y-2">
+                                    <Caption text={captionLabel} />
+                                    <PDBViewer {...viewerProps} />
+                                    {Array.isArray(data.operations) && data.operations.length > 0 && (
+                                        <div className="text-[11px] bg-[var(--input-background-color)] border border-[var(--border-color)] rounded p-2 space-y-1">
+                                            <p className="font-semibold text-[var(--foreground-color)]">Suggested edits</p>
+                                            <ul className="list-disc list-inside space-y-1">
+                                                {data.operations.map((op: any, idx: number) => (
+                                                    <li key={`edit-op-${idx}`}>
+                                                        {op.type === 'mutate'
+                                                            ? `Mutate chain ${op.chain} residue ${op.resSeq} to ${op.to}`
+                                                            : op.type === 'delete_chain'
+                                                                ? `Delete chain ${op.chain}`
+                                                                : JSON.stringify(op)}
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        }
+                        break;
+                    }
+                    case ContentType.PDB_INTERFACE: {
+                        const residues = Array.isArray(data.residues) ? data.residues : [];
+                        contentWithCaption = (
+                            <div className="p-4 bg-[var(--input-background-color)] rounded-lg border border-[var(--border-color)] space-y-2">
+                                <Caption text={`Chain Interface: ${(data.chainA ?? '?').toUpperCase()} <> ${(data.chainB ?? '?').toUpperCase()}`} />
+                                <p className="text-xs text-[var(--muted-foreground-color)]">Distance cutoff: {data.cutoff ?? 'N/A'} angstroms</p>
+                                {residues.length > 0 ? (
+                                    <table className="w-full text-xs border border-[var(--border-color)] rounded overflow-hidden">
+                                        <thead className="bg-[var(--border-color)]/40">
+                                            <tr>
+                                                <th className="px-2 py-1 text-left">Chain</th>
+                                                <th className="px-2 py-1 text-left">Residue</th>
+                                                <th className="px-2 py-1 text-left">Index</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {residues.map((res: any, idx: number) => (
+                                                <tr key={`interface-res-${idx}`} className={idx % 2 ? 'bg-black/5 dark:bg-white/5' : ''}>
+                                                    <td className="px-2 py-1 font-semibold">{res.chain}</td>
+                                                    <td className="px-2 py-1">{res.resName}</td>
+                                                    <td className="px-2 py-1">{res.resSeq}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                ) : (
+                                    <p className="text-xs">No interacting residues detected for this cutoff.</p>
+                                )}
+                            </div>
+                        );
+                        break;
+                    }
                     case ContentType.PUBMED_SUMMARY:
                         contentWithCaption = (<div className="p-4 bg-[var(--input-background-color)] rounded-lg border border-[var(--border-color)]"><Caption text="Literature Summary" /><h3 className="font-bold mb-2 primary-text">Summary</h3><MarkdownRenderer content={data.summary} /></div>);
                         break;
