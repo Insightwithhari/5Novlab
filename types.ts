@@ -72,6 +72,8 @@ export interface RecentChat {
 export enum ContentType {
     TEXT = 'text',
     PDB_VIEWER = 'pdb_viewer',
+  EDIT_PDB = 'edit_pdb',
+  PDB_INTERFACE = 'pdb_interface',
     BLAST_RESULT = 'blast_result',
     PUBMED_SUMMARY = 'pubmed_summary',
     SUMMARY = 'summary',

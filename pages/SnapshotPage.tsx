@@ -37,6 +37,57 @@ const SnapshotPage: React.FC = () => {
             switch (block.type) {
                 case ContentType.PDB_VIEWER:
                     return <PDBViewer pdbId={block.data.pdbId} />;
+                case ContentType.EDIT_PDB:
+                    return (
+                        <div className="space-y-2">
+                            <PDBViewer pdbId={block.data.pdbId} uniprotId={block.data.uniprotId} />
+                            {Array.isArray(block.data?.operations) && block.data.operations.length > 0 && (
+                                <div className="p-3 bg-slate-100 rounded border border-slate-200 text-xs">
+                                    <h3 className="font-bold mb-1 primary-text">Suggested Edits</h3>
+                                    <ul className="list-disc list-inside space-y-1">
+                                        {block.data.operations.map((op: any, idx: number) => (
+                                            <li key={`snap-edit-${idx}`}>
+                                                {op.type === 'mutate'
+                                                    ? `Mutate chain ${op.chain} residue ${op.resSeq} to ${op.to}`
+                                                    : op.type === 'delete_chain'
+                                                        ? `Delete chain ${op.chain}`
+                                                        : JSON.stringify(op)}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+                        </div>
+                    );
+                case ContentType.PDB_INTERFACE:
+                    return (
+                        <div className="p-4 my-2 bg-slate-100 rounded-lg border border-slate-200 space-y-2">
+                            <h3 className="font-bold primary-text">Interface Summary</h3>
+                            <p className="text-xs text-slate-600">Chains: {(block.data?.chainA ?? '?').toUpperCase()} {'<>'} {(block.data?.chainB ?? '?').toUpperCase()} (cutoff {block.data?.cutoff ?? 'N/A'} angstroms)</p>
+                            {Array.isArray(block.data?.residues) && block.data.residues.length > 0 ? (
+                                <table className="w-full text-xs border border-slate-200 rounded overflow-hidden">
+                                    <thead className="bg-slate-200/60">
+                                        <tr>
+                                            <th className="px-2 py-1 text-left">Chain</th>
+                                            <th className="px-2 py-1 text-left">Residue</th>
+                                            <th className="px-2 py-1 text-left">Index</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {block.data.residues.map((res: any, idx: number) => (
+                                            <tr key={`snap-interface-${idx}`} className={idx % 2 ? 'bg-black/5' : ''}>
+                                                <td className="px-2 py-1 font-semibold">{res.chain}</td>
+                                                <td className="px-2 py-1">{res.resName}</td>
+                                                <td className="px-2 py-1">{res.resSeq}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            ) : (
+                                <p className="text-xs">No interacting residues stored for this snapshot.</p>
+                            )}
+                        </div>
+                    );
                 case ContentType.TEXT:
                     return <MarkdownRenderer content={block.data} />;
                 case ContentType.PUBMED_SUMMARY:

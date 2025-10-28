@@ -342,6 +342,57 @@ const EditableContentBlock: React.FC<{
             switch (block.type) {
                 case ContentType.PDB_VIEWER:
                     return <div className="print-bg-white"><PDBViewer pdbId={block.data.pdbId} /></div>;
+                case ContentType.EDIT_PDB:
+                    return (
+                        <div className="print-bg-white space-y-2">
+                            <PDBViewer pdbId={block.data.pdbId} uniprotId={block.data.uniprotId} />
+                            {Array.isArray(block.data?.operations) && block.data.operations.length > 0 && (
+                                <div className="p-3 bg-[var(--input-background-color)] rounded border border-[var(--border-color)] text-xs">
+                                    <h4 className="font-semibold mb-1 primary-text print-text-black">Suggested Edits</h4>
+                                    <ul className="list-disc list-inside space-y-1">
+                                        {block.data.operations.map((op: any, idx: number) => (
+                                            <li key={`proj-edit-${block.id}-${idx}`}>
+                                                {op.type === 'mutate'
+                                                    ? `Mutate chain ${op.chain} residue ${op.resSeq} to ${op.to}`
+                                                    : op.type === 'delete_chain'
+                                                        ? `Delete chain ${op.chain}`
+                                                        : JSON.stringify(op)}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+                        </div>
+                    );
+                case ContentType.PDB_INTERFACE:
+                    return (
+                        <div className="p-4 my-2 bg-[var(--input-background-color)] print-bg-white rounded-lg border border-[var(--border-color)] space-y-2">
+                            <h3 className="font-bold primary-text print-text-black">Interface Summary</h3>
+                            <p className="text-xs text-[var(--muted-foreground-color)]">Chains: {(block.data?.chainA ?? '?').toUpperCase()} {'<>'} {(block.data?.chainB ?? '?').toUpperCase()} (cutoff {block.data?.cutoff ?? 'N/A'} angstroms)</p>
+                            {Array.isArray(block.data?.residues) && block.data.residues.length > 0 ? (
+                                <table className="w-full text-xs border border-[var(--border-color)] rounded overflow-hidden">
+                                    <thead className="bg-[var(--border-color)]/40">
+                                        <tr>
+                                            <th className="px-2 py-1 text-left">Chain</th>
+                                            <th className="px-2 py-1 text-left">Residue</th>
+                                            <th className="px-2 py-1 text-left">Index</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {block.data.residues.map((res: any, idx: number) => (
+                                            <tr key={`proj-interface-${block.id}-${idx}`} className={idx % 2 ? 'bg-black/5 dark:bg-white/5' : ''}>
+                                                <td className="px-2 py-1 font-semibold">{res.chain}</td>
+                                                <td className="px-2 py-1">{res.resName}</td>
+                                                <td className="px-2 py-1">{res.resSeq}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            ) : (
+                                <p className="text-xs">No interacting residues stored for this block.</p>
+                            )}
+                        </div>
+                    );
                 case ContentType.TEXT:
                     return <MarkdownRenderer content={block.data} />;
                 case ContentType.PUBMED_SUMMARY:
